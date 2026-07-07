@@ -1,0 +1,114 @@
+name: tester-suite
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Gating hook: FE/BE repos dispatch this event with their PR's head SHA.
+  # See docs/gating.md for the full workflow sketch.
+  repository_dispatch:
+    types: [run-tester-suite]
+
+env:
+  # The app version this suite is validated against (pinned, not a moving branch).
+  APP_REPO: TonyMckes/conduit-realworld-example-app
+  APP_SHA: 5e127d8569b300e0a21dc2c20ea680da4967b1aa
+  API_URL: http://localhost:3001/api
+  BASE_URL: http://localhost:3000
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout tester repo
+        uses: actions/checkout@v4
+
+      - name: Checkout app (pinned SHA)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.APP_REPO }}
+          ref: ${{ env.APP_SHA }}
+          path: app
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            package-lock.json
+
+      - name: Configure app environment
+        run: |
+          cat > app/.env <<'EOF'
+          PORT=3001
+          JWT_KEY=ci_only_jwt_key
+          DEV_DB_USERNAME=postgres
+          DEV_DB_PASSWORD=postgres
+          DEV_DB_NAME=conduit_development
+          DEV_DB_HOSTNAME=127.0.0.1
+          DEV_DB_DIALECT=postgres
+          DEV_DB_LOGGGIN=false
+          EOF
+          cp app/.env app/backend/.env
+
+      - name: Install app dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Create database
+        working-directory: app
+        run: npm run sqlz -- db:create
+
+      - name: Start backend (sequelize.sync builds the schema at boot)
+        working-directory: app
+        run: |
+          npm run dev -w backend &
+          npx wait-on --timeout 60000 http://localhost:3001/api/tags
+
+      # Seed AFTER boot: the checked-in migrations are stale; the schema is built by
+      # sequelize.sync({alter:true}) at startup and the seeders target the synced schema.
+      - name: Seed database
+        working-directory: app
+        run: npm run sqlz -- db:seed:all
+
+      - name: Start frontend (Vite dev server proxies /api -> :3001)
+        working-directory: app
+        run: |
+          npm run dev -w frontend &
+          npx wait-on --timeout 60000 http://localhost:3000
+
+      - name: Install tester dependencies
+        run: npm ci
+
+      - name: API tests (blocking)
+        run: npm run test:api
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E tests
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
