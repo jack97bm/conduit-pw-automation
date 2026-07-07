@@ -1,0 +1,21 @@
+{
+  "name": "nenu-tester",
+  "version": "1.0.0",
+  "description": "Central tester repo for the Conduit RealWorld app (frontend + backend) — Nenu Automation Engineer practical build exercise",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:api": "vitest run tests/api",
+    "test:e2e": "playwright test",
+    "test": "npm run test:api && npm run test:e2e",
+    "agent:generate": "tsx agent/generate-tests.ts",
+    "agent:verify": "tsx agent/verify-grounding.ts",
+    "agent:run-generated": "vitest run agent/output/generated.favorites.spec.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

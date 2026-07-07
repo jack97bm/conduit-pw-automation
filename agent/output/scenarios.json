@@ -1,0 +1,74 @@
+[
+  {
+    "id": "favorite-article-success",
+    "description": "Authenticated user POSTs to /articles/:slug/favorite on an existing article they have not favorited, and the article is added to their favorites.",
+    "citation": {
+      "file": "backend/controllers/favorites.js",
+      "snippet": "if (req.method === \"POST\") await article.addUser(loggedUser);"
+    },
+    "expected": "200 with body { article } where article.favorited === true, article.favoritesCount incremented by 1, and article includes author and tagList fields; the join row now exists in the DB."
+  },
+  {
+    "id": "unfavorite-article-success",
+    "description": "Authenticated user DELETEs /articles/:slug/favorite on an article they previously favorited, removing it from their favorites.",
+    "citation": {
+      "file": "backend/controllers/favorites.js",
+      "snippet": "if (req.method === \"DELETE\") await article.removeUser(loggedUser);"
+    },
+    "expected": "200 with body { article } where article.favorited === false and article.favoritesCount decremented by 1 relative to the favorited state."
+  },
+  {
+    "id": "favorite-twice-idempotent",
+    "description": "Authenticated user POSTs favorite twice on the same article to verify the Sequelize addUser association does not duplicate the favorite.",
+    "citation": {
+      "file": "backend/controllers/favorites.js",
+      "snippet": "const article = await Article.findOne({"
+    },
+    "expected": "Both requests return 200; after the second request article.favoritesCount is still 1 (not 2) and article.favorited === true."
+  },
+  {
+    "id": "favorite-no-auth-header",
+    "description": "Request POST /articles/:slug/favorite with no Authorization header, so verifyToken passes through without setting loggedUser and the controller rejects.",
+    "citation": {
+      "file": "backend/controllers/favorites.js",
+      "snippet": "if (!loggedUser) throw new UnauthorizedError();"
+    },
+    "expected": "UnauthorizedError is passed to the error handler (401 response); no state change to favorites."
+  },
+  {
+    "id": "favorite-nonexistent-slug",
+    "description": "Authenticated user POSTs favorite for a slug that matches no article.",
+    "citation": {
+      "file": "backend/controllers/favorites.js",
+      "snippet": "if (!article) throw new NotFoundError(\"Article\");"
+    },
+    "expected": "NotFoundError(\"Article\") is passed to the error handler (404 response); no join rows created."
+  },
+  {
+    "id": "favorite-malformed-auth-header",
+    "description": "Send POST favorite with an Authorization header lacking a token after the scheme (e.g. just \"Token\"), triggering the malformed-token branch in verifyToken.",
+    "citation": {
+      "file": "backend/middleware/authentication.js",
+      "snippet": "if (!token) throw new SyntaxError(\"Token missing or malformed\");"
+    },
+    "expected": "SyntaxError is forwarded to the error handler and the request fails with a non-2xx error response; controller is never reached and no favorite is created."
+  },
+  {
+    "id": "favorite-invalid-token",
+    "description": "Send POST favorite with an Authorization header containing a token that fails jwtVerify.",
+    "citation": {
+      "file": "backend/middleware/authentication.js",
+      "snippet": "if (!userVerified) throw new Error(\"Invalid Token\");"
+    },
+    "expected": "Error(\"Invalid Token\") is forwarded to the error handler and the request fails with a non-2xx error response; no favorite state change."
+  },
+  {
+    "id": "favorites-count-reflects-all-users",
+    "description": "Two different authenticated users favorite the same article; the second user's response must report the total count across all users while favorited reflects only the requesting user.",
+    "citation": {
+      "file": "backend/helper/helpers.js",
+      "snippet": "const favoritesCount = await article.countUsers();"
+    },
+    "expected": "Second user's 200 response has article.favoritesCount === 2 and article.favorited === true; a subsequent DELETE by user one returns favoritesCount === 1 with user one's favorited === false."
+  }
+]
